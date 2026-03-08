@@ -254,16 +254,12 @@ npm run discover
 - `extracted/` 已默认加入 `.gitignore`，避免误传专有内容。
 - 对外演示时请优先使用 masked token、脱敏路径和最小复现样例。
 
-## 发布前检查
+## 使用前验证
 
-```bash
-npm run check
-npm run discover
-```
+首次在新机器上接入时，建议至少确认以下几项：
 
-建议同时确认：
-
-- `GET /health` 可访问
-- `GET /discovery` 输出符合当前环境
-- `POST /agent/derive-token` 或 `POST /agent/capture-token` 至少一条链可用
-- `chat_stream` 的 `prompt-and-wait` 或 `SSE` 流接口可正常返回
+- `npm run check` 可通过
+- `npm run discover` 能输出当前 Verdent 运行态摘要
+- `GET /health` 与 `GET /discovery` 可访问
+- `POST /agent/derive-token` 或 `POST /agent/capture-token` 至少有一条链可用
+- `chat_stream` 的 `prompt-and-wait` 或 `SSE` 流接口能返回有效结果
