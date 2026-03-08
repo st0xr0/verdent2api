@@ -1,6 +1,6 @@
-# Verdent 逆向纪要
+# Verdent 本地集成技术说明
 
-## 已确认
+## 环境与已确认事实
 
 - 安装包：`/Applications/Verdent.app`
 - 平台形态：`Electron 39.2.7`
@@ -34,7 +34,7 @@
 
 其中 `events.actions` 已确认是 `pickle protocol 5`；当前默认仍以 hex 保真导出，但接口已支持通过安全假类解包，提取其中的 `state_delta`、`artifact_delta` 等字段。
 
-## 本地控制面
+## 本地控制接口
 
 ### `127.0.0.1:59647`
 
@@ -86,14 +86,14 @@
 
 注意：这里的远端登录态 cookie 名为 `token`，与 sidecar 本地接口要求的 `api_token` 并不是同一物。
 
-## 结论
+## 当前结论
 
 - 本地数据面已足够支撑一个只读型 `Verdent2api`。
 - sidecar `59647` 已可通过 `OpenAPI` 适配，且现在已有运行时 token 捕获链与 nonce 推导链。
 - `60142` 的业务性质已基本排除；若后续继续深挖，重点应转为更新态触发条件与 Basic Auth 凭据来源，而非把它当作主业务 API。
 
-## 下一斩
+## 后续研究方向
 
-1. 优先从 sidecar ready 日志或父进程对象里抓 `nonce`，直接用 `POST /agent/derive-token` 固化 token 推导流程
-2. 抓 Verdent UI 哪个具体动作一定会命中 `/chat_stream`
-3. 若要继续研究 `60142`，优先抓 `AutoUpdateService` 触发更新下载时的 `MacUpdater` 凭据与随机 ZIP 路径，而非再按业务 API 思路枚举
+1. 优先从 sidecar ready 日志或父进程对象里抓 `nonce`，进一步固化 `POST /agent/derive-token` 的获取链路
+2. 识别 Verdent UI 中稳定命中 `/chat_stream` 的关键用户动作
+3. 若继续研究 `60142`，优先关注 `AutoUpdateService` 触发更新下载时的 `MacUpdater` 凭据与随机 ZIP 路径

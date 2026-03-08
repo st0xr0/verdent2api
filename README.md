@@ -1,13 +1,13 @@
 # Verdent2api
 
-`Verdent2api` 是一个基于本地逆向结果构建的 API 包装层，用来把 Verdent 桌面端的本地数据面与 sidecar 控制面暴露为可脚本化接口。
+`Verdent2api` 是一个面向本机 Verdent 环境的 API 包装层，用来把本地数据面与 sidecar 控制面暴露为可脚本化接口。
 
 ## 项目状态
 
 - 当前状态：`0.1.0` / 可用的工程版
 - 适用范围：本机已安装且已授权使用的 Verdent 实例
 - 已完成能力：数据库读取、token 推导、`chat_stream` 会话桥接、工具调用聚合、subagent 观测、`SSE raw/merged`
-- 当前边界：不追求 100% 复刻 Verdent 官方前端状态机
+- 当前边界：聚焦本地集成与工程可用性，不追求 100% 复刻 Verdent 官方前端状态机
 
 ## 快速开始
 
@@ -30,7 +30,7 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
   -d '{"nonce":"<captured_nonce>","setAsCurrent":true}'
 ```
 
-当前已确认的逆向事实：
+当前已确认的实现前提：
 
 - Verdent `1.14.4` 是 `Electron` 桌面应用，`app.asar` 主入口为 `dist/index.js`。
 - 主本地数据库位于 `~/Library/Application Support/Verdent/app-v2.db`。
@@ -191,7 +191,7 @@ npm run discover
 详见：`docs/reverse-notes.md` 与 `docs/architecture.md`
 
 
-## 最小 `chat_stream` 控制面
+## `chat_stream` 接入概览
 
 当前已新增最小 WebSocket 客户端封装，可直接对接 `59647 /chat_stream`：
 
@@ -248,9 +248,9 @@ npm run discover
 - `docs/architecture.md`：当前架构说明
 - `scripts/discover.js`：运行态探测脚本
 
-## 发布说明
+## 使用与发布说明
 
-- 本仓库只包含包装层与逆向笔记，不应提交 Verdent 原始提取代码、数据库、真实 token 或用户数据。
+- 本仓库只包含包装层与技术说明，不应提交 Verdent 原始提取代码、数据库、真实 token 或用户数据。
 - `extracted/` 已默认加入 `.gitignore`，避免误传专有内容。
 - 对外演示时请优先使用 masked token、脱敏路径和最小复现样例。
 
