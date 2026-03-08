@@ -1,6 +1,6 @@
 # Verdent2api
 
-`Verdent2api` 是一个面向本机 Verdent 环境的 API 包装层，用来把本地数据面与 sidecar 控制面暴露为可脚本化接口。
+`Verdent2api` 是一个面向本机 Verdent 环境的 API 桥接层，用来把本地数据面与 sidecar 控制面暴露为可脚本化接口。
 
 ## 项目状态
 
@@ -36,13 +36,13 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 - 主本地数据库位于 `~/Library/Application Support/Verdent/app-v2.db`。
 - sidecar 进程 `verdent_agent` 暴露 `uvicorn` HTTP 服务，默认监听 `127.0.0.1:59647`。
 - `59647/openapi.json` 可匿名访问；业务接口要求 `Cookie: api_token=...`。
-- `127.0.0.1:60142` 另有一条本地服务，根路径返回 `401 Invalid Authentication Credentials`；静态逆向与响应模式表明它更像 `electron-updater` 的 `MacUpdater` 本地更新代理，而非业务 API。
+- `127.0.0.1:60142` 另有一条本地服务，根路径返回 `401 Invalid Authentication Credentials`；静态分析与响应模式表明它更像 `electron-updater` 的 `MacUpdater` 本地更新代理，而非业务 API。
 
 ## 当前能力
 
 - 读取 Verdent 本地项目、会话、消息。
 - 读取 `agent_sessions.db` 中的 agent sessions、events、app/user states。
-- 输出本机 Verdent 安装与逆向发现摘要。
+- 输出本机 Verdent 安装与本地集成发现摘要。
 - 代理 sidecar 的 `openapi`、`update/mcp`、`update/subagent`。
 - 运行时捕获并缓存 sidecar `api_token`（通过本机 `tcpdump` 抓取 `/chat_stream` 明文请求头）。
 
@@ -109,7 +109,7 @@ npm start
 
 ## 由 `nonce` 推导 `api_token`
 
-静态逆向已确认 Verdent 主进程内部的算法为：
+静态分析已确认 Verdent 主进程内部的算法为：
 
 - sidecar 启动后会向父进程 stdout 输出 `status=ready` 对应 JSON，其中含 `port` 与 `nonce`
 - 主进程使用 `md5("verdent_${nonce}_app")` 计算本地 `api_token`
@@ -124,7 +124,7 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 
 默认会把推导出的 token 直接装入当前 `Verdent2api` 进程缓存，仅返回 masked 状态，不回显明文 token。
 
-额外逆向结论：`verdent_agent` 独立启动时会向 stdout 打印 `{"status":"ready","port":...,"nonce":"..."}`，因此一旦拿到 `nonce`，即可完全绕过抓包，直接走推导链。
+补充技术结论：`verdent_agent` 独立启动时会向 stdout 打印 `{"status":"ready","port":...,"nonce":"..."}`，因此一旦拿到 `nonce`，即可直接走推导链。
 
 ## 自动捕获 `api_token`
 
@@ -188,7 +188,7 @@ npm run discover
 - 当前未拿到 `60142` 的 Basic Auth 凭据，但它大概率只服务于本地更新安装流程。
 - `60142` 目前可高度怀疑是 `electron-updater` 的 `MacUpdater` 代理：根路径 `401 Invalid Authentication Credentials`、其他随机/常见路径 `404`，与 `node_modules/electron-updater/out/MacUpdater.js` 的实现吻合。
 
-详见：`docs/reverse-notes.md` 与 `docs/architecture.md`
+详见：`docs/local-integration-notes.md` 与 `docs/architecture.md`
 
 
 ## `chat_stream` 接入概览
@@ -237,20 +237,20 @@ npm run discover
 - `accessToken` 是下行消息 envelope 里的远端登录 token；若请求体未提供，服务端会优先尝试从本机 Keychain 的 `ai.verdent.deck/access-token` 自动读取。
 - 可通过 `GET /agent/access-token-status` 查看本地远端 token 是否可读（仅返回 masked 状态）。
 - 当前实现已能稳定聚合 `stream_text` / `complete_text`、`tool_use` / `tool_result`，并在结构化 `mention{subtype: "subagent"}` prompt 下实测触发 `spawn_subagent`。
-- 当前实现仍不是对 Verdent 前端状态机的完整复刻；更复杂的 planner / review UI 事件仍建议继续结合 Electron IPC 逆向。
+- 当前实现仍不是对 Verdent 前端状态机的完整复刻；更复杂的 planner / review UI 事件仍建议继续结合 Electron IPC 分析。
 
 ## 仓库结构
 
 - `src/server.js`：HTTP API 入口
 - `src/lib/verdent-chat.js`：`chat_stream` WebSocket 桥接与聚合核心
 - `src/lib/verdent-db.js`：本地 SQLite 数据读取
-- `docs/reverse-notes.md`：逆向结论纪要
+- `docs/local-integration-notes.md`：本地集成事实说明
 - `docs/architecture.md`：当前架构说明
 - `scripts/discover.js`：运行态探测脚本
 
-## 使用与发布说明
+## 使用说明
 
-- 本仓库只包含包装层与技术说明，不应提交 Verdent 原始提取代码、数据库、真实 token 或用户数据。
+- 本仓库只包含包装层与配套说明，不应提交 Verdent 应用提取产物、数据库、真实 token 或用户数据。
 - `extracted/` 已默认加入 `.gitignore`，避免误传专有内容。
 - 对外演示时请优先使用 masked token、脱敏路径和最小复现样例。
 

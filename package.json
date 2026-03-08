@@ -2,7 +2,7 @@
   "name": "verdent2api",
   "version": "0.1.0",
   "type": "module",
-  "description": "Reverse-engineered local API wrapper and streaming bridge for Verdent",
+  "description": "Local API wrapper and streaming bridge for Verdent desktop",
   "scripts": {
     "start": "node src/server.js",
     "discover": "node scripts/discover.js",
@@ -14,7 +14,6 @@
   },
   "keywords": [
     "verdent",
-    "reverse-engineering",
     "electron",
     "api-wrapper",
     "agent",

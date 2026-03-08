@@ -44,7 +44,7 @@
 
 ### `src/lib/token-derive.js`
 
-- 基于静态逆向固化 token 算法
+- 基于静态分析固化 token 算法
 - 公式：`md5("verdent_${nonce}_app")`
 - 供手工获取 nonce 后直接装载 sidecar token
 
@@ -62,7 +62,7 @@
 
 ### `src/lib/discovery.js`
 
-- 输出逆向摘要
+- 输出本地集成摘要
 - 聚合 `app.asar`、storage、端口与事实链
 
 ### `src/server.js`

@@ -1,7 +1,7 @@
 # Contributing
 
 ## Scope
-- Keep changes focused on Verdent local integration, reverse engineering notes, and the HTTP wrapper.
+- Keep changes focused on Verdent local integration, technical notes, and the HTTP wrapper.
 - Do not commit extracted proprietary application bundles or local databases.
 
 ## Development

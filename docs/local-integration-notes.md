@@ -1,4 +1,4 @@
-# Verdent 本地集成技术说明
+# Verdent 本地集成说明
 
 ## 环境与已确认事实
 
@@ -57,10 +57,10 @@
   - `POST /update/mcp` + `{"data":{}}` -> `{"err_code":0,"msg":"ok","data":{}}`
   - `POST /update/subagent` + `{"data":{}}` -> 返回 subagent 状态摘要
 - `Verdent2api` 当前可通过 `POST /agent/capture-token` 在运行时短时抓包并缓存 token，仅返回 masked 状态
-- 静态解包 `node_modules/@verdent/shared/dist/cjs/Services/Agent/AgentDaemon.js` 已确认 token 生成算法：`md5("verdent_${nonce}_app")`
+- 已确认 token 生成算法：`md5("verdent_${nonce}_app")`
 - sidecar 启动就绪信号来自 stdout JSON：`{"status":"ready","port":...,"nonce":"..."}`，父进程据此保存 `port/nonce` 并构造 Cookie
 - 直接执行 `/Applications/Verdent.app/Contents/Resources/bin/verdent_deck/verdent_agent --help` 竟不会退出帮助，而是实际启动一个独立 sidecar，并同样打印 `status/port/nonce`
-- 已用独立实例实战验证：对打印出的 `nonce` 计算 `md5("verdent_${nonce}_app")` 后，携带 `Cookie: api_token=<md5>` 可成功调用 `/update/subagent`
+- 已用独立实例验证：对打印出的 `nonce` 计算 `md5("verdent_${nonce}_app")` 后，携带 `Cookie: api_token=<md5>` 可成功调用 `/update/subagent`
 
 鉴权提示原文：`缺少认证 token，请在 Cookie 中添加 api_token`
 
