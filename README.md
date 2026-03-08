@@ -74,6 +74,10 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 - `POST /agent/chat/sessions/:id/prompt-and-wait`
 - `POST /agent/chat/sessions/:id/control`
 - `POST /agent/chat/sessions/:id/raw`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `GET /openai/models`
+- `POST /openai/chat/completions`
 - `GET /agent/openapi`
 - `GET /agent/token-status`
 - `GET /agent/access-token-status`
@@ -82,6 +86,45 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 - `GET /agent/root`
 - `POST /agent/update/mcp`
 - `POST /agent/update/subagent`
+
+## OpenAI-compatible 接口
+
+当前已新增一层面向常见 2api / OpenAI SDK 用法的兼容接口：
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `GET /openai/models`
+- `POST /openai/chat/completions`
+
+认证约定：
+
+- `Authorization: Bearer <api_token>` 会映射为 Verdent sidecar 的本地 `api_token`
+- 也可继续使用 `x-verdent-api-token` 或预先通过 `POST /agent/derive-token`、`POST /agent/capture-token` 装载 token
+- 若确实需要远端登录态 `access token`，可显式传 `x-verdent-access-token`、`accessToken`，或在请求体中设置 `loadAccessTokenFromKeychain: true`
+
+当前兼容边界：
+
+- 目前是 **text-only / transcript-based** 兼容层：会把 `messages[]` 扁平化为 transcript 文本，再转发到 Verdent `chat_stream`
+- `system` / `assistant` / `tool` 历史会被保留为文本上下文，但不是逐字段语义保真映射
+- `stream: true` 当前提供 **partial streaming compatibility**：支持 `content delta`，并会在检测到 `tool_use` 时输出基础 `tool_calls delta`；但仍非完整 OpenAI tool streaming 语义
+- 若上游 Verdent 账号额度耗尽，返回上游错误属正常现象，不视为本地兼容层故障
+
+示例：
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/models
+
+curl -sS http://127.0.0.1:8787/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'Authorization: Bearer <verdent_api_token>' \
+  -d '{
+    "model": "verdent-chat",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "你好，介绍一下你自己"}
+    ]
+  }'
+```
 
 ## 运行
 

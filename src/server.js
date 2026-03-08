@@ -22,6 +22,7 @@ import { captureAgentApiToken } from './lib/token-capture.js';
 import { deriveAgentApiTokenFromNonce } from './lib/token-derive.js';
 import { getAgentApiToken, getAgentApiTokenStatus, setAgentApiToken } from './lib/token-store.js';
 import { getVerdentAccessTokenInfo, getVerdentAccessTokenStatus } from './lib/verdent-auth.js';
+import { buildOpenAiChatCompletion, buildOpenAiInput, createChunk, createOpenAiCompletionId, createToolCallDelta, getOpenAiFinishReason, listOpenAiModels, sendOpenAiError } from './lib/openai.js';
 
 const defaultPort = Number(process.env.PORT || 8787);
 const host = '127.0.0.1';
@@ -45,7 +46,19 @@ function matchPath(pathname, regex) {
   return match ? match.slice(1) : null;
 }
 
+function getBearerToken(req) {
+  const authorization = req.headers.authorization;
+  if (typeof authorization !== 'string') return null;
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
 function getRequestApiToken(req) {
+  const bearerToken = getBearerToken(req);
+  if (bearerToken) {
+    return bearerToken;
+  }
+
   const headerToken = req.headers['x-verdent-api-token'];
   if (typeof headerToken === 'string' && headerToken.trim()) {
     return headerToken.trim();
@@ -217,6 +230,206 @@ const server = http.createServer(async (req, res) => {
           decodeActions: url.searchParams.get('decodeActions') === '1',
         }),
       });
+    }
+
+    if (req.method === 'GET' && (pathname === '/v1/models' || pathname === '/openai/models')) {
+      return sendJson(res, 200, {
+        object: 'list',
+        data: listOpenAiModels(),
+      });
+    }
+
+    if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/openai/chat/completions')) {
+      const payload = await readJsonBody(req);
+      const input = buildOpenAiInput(payload);
+
+      if (!input.messages.length) {
+        return sendOpenAiError(res, 400, 'messages must be a non-empty array');
+      }
+
+      if (!input.promptText.trim()) {
+        return sendOpenAiError(res, 400, 'messages must contain at least one text content part');
+      }
+
+      const shouldLoadAccessToken = payload.loadAccessTokenFromKeychain === true;
+      const localAccessToken =
+        getRequestAccessToken(req) ||
+        payload.accessToken ||
+        (shouldLoadAccessToken ? (await getVerdentAccessTokenInfo().catch(() => null))?.accessToken : null) ||
+        null;
+
+      const resolvedApiToken = payload.apiToken || apiToken;
+      if (!resolvedApiToken) {
+        return sendOpenAiError(res, 401, 'Verdent api_token is required. Provide Authorization: Bearer <api_token> or pre-load it via /agent/derive-token or /agent/capture-token.', 'authentication_error');
+      }
+
+      const chatSession = verdentChatManager.createSession({
+        apiToken: resolvedApiToken,
+        accessToken: localAccessToken,
+        port: Number(payload.port || process.env.VERDENT_AGENT_PORT || 59647),
+        cwd: payload.cwd,
+        projectHash: payload.projectHash,
+        resourceBucketId: payload.resourceBucketId,
+      });
+
+      const cleanupSession = () => verdentChatManager.removeSession(chatSession.sessionId);
+
+      try {
+        await chatSession.connect();
+      } catch (error) {
+        cleanupSession();
+        return sendOpenAiError(res, 502, error instanceof Error ? error.message : String(error), 'api_error');
+      }
+
+      const completionId = createOpenAiCompletionId();
+
+      if (!input.stream) {
+        const sinceIndex = chatSession.eventCount;
+
+        try {
+          await chatSession.sendPrompt({
+            text: input.promptText,
+            resumeSessionId: payload.resumeSessionId,
+            resourceBucketId: payload.resourceBucketId,
+            debugMode: payload.debugMode,
+          });
+
+          const wait = await chatSession.waitForIdle({
+            sinceIndex,
+            timeoutMs: payload.timeoutMs,
+            idleMs: payload.idleMs,
+          });
+
+          const merged = chatSession.summarize({ sinceIndex });
+          const response = buildOpenAiChatCompletion({
+            id: completionId,
+            model: input.model,
+            sessionId: chatSession.sessionId,
+            merged,
+            wait,
+          });
+          cleanupSession();
+          return sendJson(res, 200, response);
+        } catch (error) {
+          cleanupSession();
+          return sendOpenAiError(res, 502, error instanceof Error ? error.message : String(error), 'api_error');
+        }
+      }
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+
+      if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+      }
+
+      let closed = false;
+      let roleSent = false;
+      let finishSent = false;
+      let lastFinishReason = 'stop';
+      const textState = new Map();
+      const emittedToolCalls = new Set();
+
+      const writeChunk = (chunk) => {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      };
+
+      const finish = (finishReason = lastFinishReason || 'stop') => {
+        if (closed || finishSent) return;
+        finishSent = true;
+        if (!roleSent) {
+          writeChunk(createChunk({ id: completionId, model: input.model, delta: { role: 'assistant' } }));
+          roleSent = true;
+        }
+        writeChunk(createChunk({ id: completionId, model: input.model, delta: {}, finishReason }));
+        res.write('data: [DONE]\n\n');
+        cleanup();
+      };
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        chatSession.emitter.off('event', onEvent);
+        cleanupSession();
+        res.end();
+      };
+
+      const emitDelta = (body = {}) => {
+        const textId = body.id || 'default';
+        const incomingText = typeof body.text === 'string' ? body.text : '';
+        const previousText = textState.get(textId) || '';
+        const deltaText = incomingText.startsWith(previousText) ? incomingText.slice(previousText.length) : incomingText;
+        const nextText = incomingText.startsWith(previousText) ? incomingText : previousText + incomingText;
+        textState.set(textId, nextText);
+        if (!deltaText) return;
+        if (!roleSent) {
+          writeChunk(createChunk({ id: completionId, model: input.model, delta: { role: 'assistant' } }));
+          roleSent = true;
+        }
+        writeChunk(createChunk({ id: completionId, model: input.model, delta: { content: deltaText } }));
+      };
+
+      const emitToolCall = (body = {}) => {
+        const toolId = body.id || null;
+        if (!toolId || emittedToolCalls.has(toolId)) return;
+        emittedToolCalls.add(toolId);
+        if (!roleSent) {
+          writeChunk(createChunk({ id: completionId, model: input.model, delta: { role: 'assistant' } }));
+          roleSent = true;
+        }
+        writeChunk(createChunk({ id: completionId, model: input.model, delta: createToolCallDelta({ id: toolId, name: body.name, toolBody: body.tool_body || {} }, emittedToolCalls.size - 1) }));
+        lastFinishReason = 'tool_calls';
+      };
+
+      const onEvent = (entry) => {
+        const event = entry?.event || {};
+        const type = event.type;
+        const body = event.body || {};
+
+        if (type === 'tool_use') {
+          emitToolCall(body);
+          return;
+        }
+
+        if (type === 'stream_text' || type === 'complete_text') {
+          emitDelta(body);
+          if (type === 'complete_text' && chatSession.closed) {
+            finish(lastFinishReason);
+          }
+          return;
+        }
+
+        if (type === 'agent_end' || type === 'agent_pending') {
+          finish(lastFinishReason);
+          return;
+        }
+
+        if (type === 'agent_error') {
+          finish(lastFinishReason);
+        }
+      };
+
+      chatSession.emitter.on('event', onEvent);
+      req.on('close', cleanup);
+      req.on('aborted', cleanup);
+
+      try {
+        await chatSession.sendPrompt({
+          text: input.promptText,
+          resumeSessionId: payload.resumeSessionId,
+          resourceBucketId: payload.resourceBucketId,
+          debugMode: payload.debugMode,
+        });
+      } catch (error) {
+        return finish('stop');
+      }
+
+      return;
     }
 
     if (req.method === 'GET' && pathname === '/agent/chat/sessions') {
@@ -601,6 +814,10 @@ const server = http.createServer(async (req, res) => {
         'GET /agent-db/sessions?appName=&userId=&limit=',
         'GET /agent-db/sessions/:id?appName=&userId=',
         'GET /agent-db/sessions/:id/events?appName=&userId=&invocationId=&limit=&decodeActions=1',
+        'GET /v1/models',
+        'POST /v1/chat/completions',
+        'GET /openai/models',
+        'POST /openai/chat/completions',
         'GET /agent/chat/sessions',
         'POST /agent/chat/sessions',
         'GET /agent/chat/sessions/:id',
