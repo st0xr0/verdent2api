@@ -22,7 +22,7 @@ import { captureAgentApiToken } from './lib/token-capture.js';
 import { deriveAgentApiTokenFromNonce } from './lib/token-derive.js';
 import { getAgentApiToken, getAgentApiTokenStatus, setAgentApiToken } from './lib/token-store.js';
 import { getVerdentAccessTokenInfo, getVerdentAccessTokenStatus } from './lib/verdent-auth.js';
-import { buildOpenAiChatCompletion, buildOpenAiInput, createChunk, createOpenAiCompletionId, createToolCallDelta, getOpenAiFinishReason, listOpenAiModels, sendOpenAiError } from './lib/openai.js';
+import { buildOpenAiChatCompletion, buildOpenAiInput, buildOpenAiResponseObject, createChunk, createOpenAiCompletionId, createToolCallDelta, listOpenAiModels, sendOpenAiError } from './lib/openai.js';
 
 const defaultPort = Number(process.env.PORT || 8787);
 const host = '127.0.0.1';
@@ -237,6 +237,94 @@ const server = http.createServer(async (req, res) => {
         object: 'list',
         data: listOpenAiModels(),
       });
+    }
+
+    if (req.method === 'POST' && (pathname === '/v1/responses' || pathname === '/openai/responses')) {
+      const payload = await readJsonBody(req);
+      if (payload.stream) {
+        return sendOpenAiError(res, 400, 'stream=true is not implemented for /v1/responses yet');
+      }
+
+      const inputPayload = {
+        model: payload.model,
+        messages: Array.isArray(payload.input)
+          ? payload.input.map(item => ({ role: item.role || 'user', content: item.content }))
+          : [{ role: 'user', content: payload.input || '' }],
+        max_completion_tokens: payload.max_output_tokens,
+        metadata: payload.metadata,
+        tools: payload.tools,
+        tool_choice: payload.tool_choice,
+        apiToken: payload.apiToken,
+        accessToken: payload.accessToken,
+        loadAccessTokenFromKeychain: payload.loadAccessTokenFromKeychain,
+        timeoutMs: payload.timeoutMs,
+        idleMs: payload.idleMs,
+        port: payload.port,
+        cwd: payload.cwd,
+        projectHash: payload.projectHash,
+        resourceBucketId: payload.resourceBucketId,
+        resumeSessionId: payload.resumeSessionId,
+        debugMode: payload.debugMode,
+      };
+
+      const input = buildOpenAiInput(inputPayload);
+      if (!input.messages.length || !input.promptText.trim()) {
+        return sendOpenAiError(res, 400, 'input must contain at least one text item');
+      }
+
+      const shouldLoadAccessToken = payload.loadAccessTokenFromKeychain === true;
+      const localAccessToken =
+        getRequestAccessToken(req) ||
+        payload.accessToken ||
+        (shouldLoadAccessToken ? (await getVerdentAccessTokenInfo().catch(() => null))?.accessToken : null) ||
+        null;
+
+      const resolvedApiToken = payload.apiToken || apiToken;
+      if (!resolvedApiToken) {
+        return sendOpenAiError(res, 401, 'Verdent api_token is required. Provide Authorization: Bearer <api_token> or pre-load it via /agent/derive-token or /agent/capture-token.', 'authentication_error');
+      }
+
+      const chatSession = verdentChatManager.createSession({
+        apiToken: resolvedApiToken,
+        accessToken: localAccessToken,
+        port: Number(payload.port || process.env.VERDENT_AGENT_PORT || 59647),
+        cwd: payload.cwd,
+        projectHash: payload.projectHash,
+        resourceBucketId: payload.resourceBucketId,
+      });
+
+      const cleanupSession = () => verdentChatManager.removeSession(chatSession.sessionId);
+
+      try {
+        await chatSession.connect();
+        const sinceIndex = chatSession.eventCount;
+        await chatSession.sendPrompt({
+          text: input.promptText,
+          resumeSessionId: payload.resumeSessionId,
+          resourceBucketId: payload.resourceBucketId,
+          debugMode: payload.debugMode,
+        });
+
+        const wait = await chatSession.waitForIdle({
+          sinceIndex,
+          timeoutMs: payload.timeoutMs,
+          idleMs: payload.idleMs,
+        });
+
+        const merged = chatSession.summarize({ sinceIndex });
+        const response = buildOpenAiResponseObject({
+          id: createOpenAiCompletionId(),
+          model: input.model,
+          sessionId: chatSession.sessionId,
+          merged,
+          wait,
+        });
+        cleanupSession();
+        return sendJson(res, 200, response);
+      } catch (error) {
+        cleanupSession();
+        return sendOpenAiError(res, 502, error instanceof Error ? error.message : String(error), 'api_error');
+      }
     }
 
     if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/openai/chat/completions')) {
@@ -816,8 +904,10 @@ const server = http.createServer(async (req, res) => {
         'GET /agent-db/sessions/:id/events?appName=&userId=&invocationId=&limit=&decodeActions=1',
         'GET /v1/models',
         'POST /v1/chat/completions',
+        'POST /v1/responses',
         'GET /openai/models',
         'POST /openai/chat/completions',
+        'POST /openai/responses',
         'GET /agent/chat/sessions',
         'POST /agent/chat/sessions',
         'GET /agent/chat/sessions/:id',

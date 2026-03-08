@@ -76,8 +76,10 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 - `POST /agent/chat/sessions/:id/raw`
 - `GET /v1/models`
 - `POST /v1/chat/completions`
+- `POST /v1/responses`
 - `GET /openai/models`
 - `POST /openai/chat/completions`
+- `POST /openai/responses`
 - `GET /agent/openapi`
 - `GET /agent/token-status`
 - `GET /agent/access-token-status`
@@ -93,8 +95,10 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
+- `POST /v1/responses`
 - `GET /openai/models`
 - `POST /openai/chat/completions`
+- `POST /openai/responses`
 
 认证约定：
 
@@ -107,6 +111,8 @@ curl -sS -X POST http://127.0.0.1:8787/agent/derive-token \
 - 目前是 **text-only / transcript-based** 兼容层：会把 `messages[]` 扁平化为 transcript 文本，再转发到 Verdent `chat_stream`
 - `system` / `assistant` / `tool` 历史会被保留为文本上下文，但不是逐字段语义保真映射
 - `stream: true` 当前提供 **partial streaming compatibility**：支持 `content delta`，并会在检测到 `tool_use` 时输出基础 `tool_calls delta`；但仍非完整 OpenAI tool streaming 语义
+- 传入 `tools` / `tool_choice` 时，会被转换为 transcript 提示文本下沉到 Verdent；当前属于 request-side compatibility，而非原生 structured tool planning
+- `POST /v1/responses` 现已支持非流式调用，`stream=true` 尚未实现
 - 若上游 Verdent 账号额度耗尽，返回上游错误属正常现象，不视为本地兼容层故障
 
 示例：
@@ -306,3 +312,15 @@ npm run discover
 - `GET /health` 与 `GET /discovery` 可访问
 - `POST /agent/derive-token` 或 `POST /agent/capture-token` 至少有一条链可用
 - `chat_stream` 的 `prompt-and-wait` 或 `SSE` 流接口能返回有效结果
+
+### `responses` 示例
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'content-type: application/json' \
+  -H 'Authorization: Bearer <verdent_api_token>' \
+  -d '{
+    "model": "verdent-chat",
+    "input": "你好，给我一个简短自我介绍"
+  }'
+```

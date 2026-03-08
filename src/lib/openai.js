@@ -21,7 +21,27 @@ export function extractMessageText(content) {
   return normalizeContentPart(content);
 }
 
-export function openAiMessagesToPrompt(messages) {
+function renderToolSpec(tool, index) {
+  const fn = tool?.function || {};
+  const name = fn.name || `tool_${index + 1}`;
+  const description = fn.description ? `\nDescription: ${fn.description}` : '';
+  const parameters = fn.parameters ? `\nJSON Schema: ${JSON.stringify(fn.parameters)}` : '';
+  return `- ${name}${description}${parameters}`;
+}
+
+function renderToolInstruction(tools = [], toolChoice = null) {
+  if (!Array.isArray(tools) || tools.length === 0) return '';
+  const lines = tools.map(renderToolSpec);
+  let choiceLine = '';
+  if (typeof toolChoice === 'string' && toolChoice) {
+    choiceLine = `\nTool choice: ${toolChoice}`;
+  } else if (toolChoice && typeof toolChoice === 'object') {
+    choiceLine = `\nTool choice: ${JSON.stringify(toolChoice)}`;
+  }
+  return ['# tools', 'Available tools for this request:', ...lines].join('\n') + choiceLine;
+}
+
+export function openAiMessagesToPrompt(messages, { tools = [], toolChoice = null } = {}) {
   return messages
     .map((message, index) => {
       const role = message?.role || 'user';
@@ -31,6 +51,8 @@ export function openAiMessagesToPrompt(messages) {
       return `# ${index + 1} ${role}${name}\n${text}`;
     })
     .filter(Boolean)
+    .concat(renderToolInstruction(tools, toolChoice) || [])
+    .filter(Boolean)
     .join('\n\n');
 }
 
@@ -39,11 +61,13 @@ export function buildOpenAiInput(payload) {
   return {
     model: payload?.model || DEFAULT_MODEL,
     messages,
-    promptText: openAiMessagesToPrompt(messages),
+    promptText: openAiMessagesToPrompt(messages, { tools: payload?.tools || [], toolChoice: payload?.tool_choice ?? payload?.toolChoice ?? null }),
     stream: Boolean(payload?.stream),
     temperature: payload?.temperature,
     maxTokens: payload?.max_completion_tokens ?? payload?.max_tokens ?? null,
     metadata: payload?.metadata || null,
+    tools: Array.isArray(payload?.tools) ? payload.tools : [],
+    toolChoice: payload?.tool_choice ?? payload?.toolChoice ?? null,
   };
 }
 
@@ -164,5 +188,39 @@ export function createToolCallDelta(tool, index = 0) {
         },
       },
     ],
+  };
+}
+
+
+export function buildOpenAiResponseObject({ id, model, sessionId, merged, wait = null }) {
+  const completion = buildOpenAiChatCompletion({ id, model, sessionId, merged, wait });
+  const message = completion.choices?.[0]?.message || { role: 'assistant', content: '' };
+  const outputText = typeof message.content === 'string' ? message.content : '';
+  return {
+    id: id.replace(/^chatcmpl-/, 'resp-'),
+    object: 'response',
+    created_at: completion.created,
+    model: completion.model,
+    status: 'completed',
+    output: [
+      {
+        id: `msg_${sessionId}`,
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'output_text',
+            text: outputText,
+            annotations: [],
+          },
+        ],
+      },
+    ],
+    output_text: outputText,
+    usage: completion.usage,
+    incomplete_details: wait?.timedOut ? { reason: 'max_output_tokens' } : null,
+    metadata: null,
+    tool_calls: message.tool_calls || [],
+    session_id: sessionId,
   };
 }
