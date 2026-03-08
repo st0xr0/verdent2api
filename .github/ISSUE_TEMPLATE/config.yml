@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/OWNER/REPO/security/advisories/new
+    about: 涉及敏感安全问题时请走私密安全通道

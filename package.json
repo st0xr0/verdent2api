@@ -1,0 +1,23 @@
+{
+  "name": "verdent2api",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Reverse-engineered local API wrapper and streaming bridge for Verdent",
+  "scripts": {
+    "start": "node src/server.js",
+    "discover": "node scripts/discover.js",
+    "check": "node --check src/server.js && node --check src/lib/verdent-chat.js && node --check scripts/discover.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "verdent",
+    "reverse-engineering",
+    "electron",
+    "api-wrapper",
+    "agent",
+    "sse"
+  ]
+}
